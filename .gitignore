@@ -8,9 +8,16 @@ __pycache__/
 node_modules/
 .next/
 
-# Data
-data/
+# Data (large files, personal data)
+data/trailforks/
+data/backups/
 *.kml
+
+# Python build artifacts
+*.egg-info/
+dist/
+.ruff_cache/
+.mypy_cache/
 
 # OS
 .DS_Store
