@@ -1,6 +1,6 @@
 # dirt-dossier
 
-A personal mountain biking dashboard that ingests Strava ride data and matches it against Trailforks trail geometry. Solo-use, local-first, built to eventually scale to a hosted deployment.
+A personal mountain biking dashboard that ingests Strava ride data and matches it against OpenStreetMap trail geometry. Solo-use, local-first, built to eventually scale to a hosted deployment.
 
 ## For Claude Code
 
@@ -43,7 +43,7 @@ Do not build any of the above without explicit instruction. When in doubt, ask.
 - GeoAlchemy2 for PostGIS integration
 - shapely for Python-side geometry work
 - httpx for Strava API calls
-- fastkml and lxml for KML parsing
+- osmium-tool (`osmium`) as a CLI dependency for filtering OSM PBF extracts. Install via apt: `sudo apt install osmium-tool`. Python binding `osmium` (pyosmium) for in-script parsing.
 - uv for dependency management (faster than pip)
 
 ### Frontend (dashboard)
@@ -64,9 +64,10 @@ Do not build any of the above without explicit instruction. When in doubt, ask.
 - Single compose file at the repo root
 - Services: `db` (Postgres+PostGIS) only in Phase 1. The API runs as a Python process from the user's terminal, not containerized yet, for fast iteration.
 
-### External APIs
+### External APIs and data sources
 - Strava API v3 (OAuth 2.0, athlete capacity 1 / "Single Player Mode")
-- Trailforks: manual KML export from the website, not API access (Trailforks does not grant API access for personal projects)
+- **OpenStreetMap via Geofabrik regional extracts** for trail geometry. Download `british-columbia-latest.osm.pbf` from https://download.geofabrik.de/north-america/canada/british-columbia.html. Filter locally with `osmium` to the Nanaimo bounding box and mountain-bike-relevant tags. No API dependency, no rate limits, no auth. Refresh quarterly.
+- Trailforks is NOT a data source for this project. Their free tier does not permit KML export (Pro required, ~$50 CAD/year) and their API is not granted to personal projects. We considered it and deliberately chose OSM instead. Do not add Trailforks as a source without explicit instruction.
 - Open-Meteo historical weather API (Phase 2, no key required)
 - Anthropic API (Phase 2, for monthly writeups)
 
@@ -88,7 +89,7 @@ dirt-dossier/
 ├── docs/
 │   ├── wsl-setup.md             # WSL2 installation guide
 │   ├── strava-oauth.md          # How to register Strava app and auth flow
-│   ├── trailforks-export.md     # How to download the Nanaimo KML
+│   ├── osm-import.md            # How to download BC extract and filter Nanaimo trails
 │   └── schema.md                # Database schema documentation
 ├── api/                         # Python backend
 │   ├── pyproject.toml
@@ -102,7 +103,7 @@ dirt-dossier/
 │   │       ├── strava.py        # Strava API client
 │   │       └── matching.py      # Trail matching logic
 │   └── scripts/
-│       ├── import_trails.py     # One-time KML import
+│       ├── import_trails.py     # One-time OSM PBF import
 │       ├── bootstrap_strava.py  # One-time history backfill
 │       ├── sync_recent.py       # Ongoing manual sync
 │       ├── match_all.py         # Re-run trail matching for all rides
@@ -127,7 +128,7 @@ dirt-dossier/
 │   │   └── lib/
 │   └── drizzle/                 # Generated migrations
 └── data/
-    ├── trailforks/              # Downloaded KML files (gitignored)
+    ├── osm/                     # Downloaded OSM extracts (gitignored)
     └── backups/                 # pg_dump output (gitignored)
 ```
 
@@ -138,17 +139,19 @@ All tables use SRID 4326 (WGS84 lat/lng) for geometry columns. Store as `GEOMETR
 ```sql
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- Trails from Trailforks KML, one-time import
+-- Trails from OpenStreetMap (via Geofabrik BC extract), one-time import, refreshed quarterly
 CREATE TABLE trails (
     id SERIAL PRIMARY KEY,
-    trailforks_id TEXT UNIQUE,
+    osm_way_id BIGINT UNIQUE,  -- OSM way ID, null if manually added
     name TEXT NOT NULL,
     region TEXT NOT NULL DEFAULT 'nanaimo',
-    difficulty TEXT,  -- green, blue, black, double_black
-    direction TEXT,   -- up, down, both
+    difficulty TEXT,  -- derived from mtb:scale tag where present; null otherwise
+    direction TEXT,   -- up, down, both (from oneway tag where present)
     length_m INTEGER,
     descent_m INTEGER,
     ascent_m INTEGER,
+    source TEXT NOT NULL DEFAULT 'osm',  -- 'osm', 'manual', or future sources
+    raw_tags JSONB,  -- full OSM tag set for reference
     geometry GEOMETRY(LINESTRING, 4326) NOT NULL,
     last_refreshed_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -264,8 +267,9 @@ Do not proceed until the user confirms the healthcheck runs.
 ### Week 2: Data ingest
 
 **Done when:**
-- User has downloaded the Nanaimo region KML from Trailforks (see `docs/trailforks-export.md`)
-- `scripts/import_trails.py` parses the KML and populates the `trails` table
+- A new Alembic migration renames `trails.trailforks_id` to `trails.osm_way_id` (BIGINT), adds `trails.source` column (TEXT, default 'osm'), and adds `trails.raw_tags` column (JSONB). The ORM model and any script stubs are updated to match.
+- User has downloaded the BC extract from Geofabrik (see `docs/osm-import.md`) and placed it at `data/osm/british-columbia-latest.osm.pbf`
+- `scripts/import_trails.py` uses `osmium` to filter the BC extract to a Nanaimo bounding box and MTB-relevant tags, parses the result, and populates the `trails` table with geometries, names, OSM way IDs, difficulty (from `mtb:scale` where present), and raw tags
 - User has registered a Strava app and added credentials to `.env` (see `docs/strava-oauth.md`)
 - OAuth flow completes, tokens are stored in `strava_auth` table
 - `scripts/bootstrap_strava.py` successfully backfills the user's entire Strava history into `activities` (respecting rate limits with sleep-and-retry)
@@ -420,7 +424,7 @@ To prevent scope creep, these are things the user has explicitly decided against
 - No Pi deployment yet (local PC only)
 - No Strava webhooks (manual sync is fine)
 - No replicating Strava's UI; link out to Strava for polished ride maps
-- No segment tracking (trails only, via Trailforks data)
+- No segment tracking (trails only, via OpenStreetMap data)
 - No admin CRUD UI (seed scripts for manual data)
 - No tests beyond manual verification
 - No public-facing deployment
