@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from geoalchemy2 import Geometry
 from sqlalchemy import (
+    TIMESTAMP,
     BigInteger,
     CheckConstraint,
     Date,
@@ -13,7 +14,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy import TIMESTAMP
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -25,7 +25,7 @@ class Trail(Base):
     __tablename__ = "trails"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    trailforks_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    osm_way_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     region: Mapped[str] = mapped_column(Text, nullable=False, server_default="nanaimo")
     difficulty: Mapped[str | None] = mapped_column(Text)
@@ -33,6 +33,8 @@ class Trail(Base):
     length_m: Mapped[int | None] = mapped_column(Integer)
     descent_m: Mapped[int | None] = mapped_column(Integer)
     ascent_m: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(Text, nullable=False, server_default="osm")
+    raw_tags: Mapped[dict | None] = mapped_column(JSONB)
     geometry: Mapped[bytes] = mapped_column(Geometry("LINESTRING", srid=4326), nullable=False)
     last_refreshed_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now()
@@ -88,7 +90,9 @@ class MaintenanceLog(Base):
     action_date: Mapped[date] = mapped_column(Date, nullable=False)
     cost_cad: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     notes: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now()
+    )
 
     bike: Mapped["Bike | None"] = relationship(back_populates="maintenance_logs")
     component: Mapped["Component | None"] = relationship(back_populates="maintenance_logs")
@@ -116,7 +120,9 @@ class Activity(Base):
     weather: Mapped[dict | None] = mapped_column(JSONB)
     geometry: Mapped[bytes | None] = mapped_column(Geometry("LINESTRING", srid=4326))
     raw_summary: Mapped[dict | None] = mapped_column(JSONB)
-    ingested_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    ingested_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now()
+    )
 
     bike: Mapped["Bike | None"] = relationship(back_populates="activities")
     activity_trails: Mapped[list["ActivityTrail"]] = relationship(back_populates="activity")
@@ -140,7 +146,9 @@ class ActivityTrail(Base):
     elapsed_s: Mapped[int | None] = mapped_column(Integer)
     avg_speed_mps: Mapped[Decimal | None] = mapped_column(Numeric)
     direction: Mapped[str | None] = mapped_column(Text)
-    matched_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    matched_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now()
+    )
 
     activity: Mapped["Activity"] = relationship(back_populates="activity_trails")
     trail: Mapped["Trail"] = relationship(back_populates="activity_trails")
@@ -155,4 +163,6 @@ class StravaAuth(Base):
     access_token: Mapped[str] = mapped_column(Text, nullable=False)
     refresh_token: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
-    updated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now()
+    )

@@ -17,6 +17,7 @@ dependencies = [
     "alembic>=1.13",
     "psycopg2-binary>=2.9",
     "pydantic-settings>=2.13.1",
+    "osmium>=4.3.1",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +35,11 @@ select = ["E", "F", "I"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.11",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dirt_dossier"]
